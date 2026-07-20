@@ -129,7 +129,6 @@ async function joinRoom(code, name, role){
     render(); return;
   }
   const myId = uid();
-  // writing to our own unique key — safe even if many people join at the same instant
   await set(ref(db, `rooms/${code}/players/${myId}`), { name: cleanName || 'لاعب', role, isHost:false });
   S.myId = myId;
   S.myName = cleanName || 'لاعب';
@@ -156,7 +155,6 @@ async function startGame(){
 }
 
 async function submitMafiaVote(targetId){
-  // writing to our own key inside mafiaVotes — no read-then-write race condition
   await set(ref(db, `actions/${S.roomCode}/mafiaVotes/${S.myId}`), targetId);
 }
 
@@ -191,7 +189,6 @@ async function finishNight(){
   const res = {
     silencedId: silencedId || null,
     silencedName: silencedName || null,
-    // عمدًا ما منخزّن اسم الشخص يلي سأل عنه الشيخ ولا اسم الشيخ — بس النتيجة العامة
     sheikhAsked: !!a.sheikhTarget,
     sheikhVerdict: a.sheikhVerdict || null,
     computedAt: Date.now()
@@ -204,13 +201,11 @@ async function endRound(){
   await update(ref(db, 'rooms/'+room.code), { phase: 'end' });
 }
 
-// كل رسالة إلها مفتاح فريد (push) عشان ما تصير رسالتين تكتبان بنفس اللحظة تلغي بعض
 async function sendMafiaChat(text){
   const msgRef = push(ref(db, 'mafiaChat/'+S.roomCode));
   await set(msgRef, { senderId: S.myId, senderName: S.myName, text, ts: Date.now() });
 }
 
-// host-only: wipes the whole room from the database (تنظيف بعد ما تخلص اللعبة)
 async function deleteRoom(code){
   await remove(ref(db, 'rooms/'+code));
   await remove(ref(db, 'actions/'+code));
@@ -229,7 +224,6 @@ function resetLocal(){
 function render(){
   const app = document.getElementById('app');
   app.innerHTML = buildView();
-  // الصورة بتظهر بس بالصفحة الرئيسية الأولى (قبل ما ينشئ غرفة أو ينضم لأي قسم)
   const isLandingHome = !S.roomCode && S.view === 'home';
   document.body.classList.toggle('home-bg', isLandingHome);
   wireEvents();
@@ -290,7 +284,7 @@ async function handleAction(act, val, el){
     return;
   }
   if(act==='sheikh-submit'){
-    if(actions && actions.sheikhSubmitted){ return; } // قفل نهائي: سؤال واحد بس بالليلة
+    if(actions && actions.sheikhSubmitted){ return; }
     const raw = document.getElementById('inp-sheikh-target').value.trim();
     sheikhSearchError = '';
     if(!raw){ sheikhSearchError = 'اكتب اسم الشخص أولاً.'; render(); return; }
@@ -422,10 +416,7 @@ function hostLobby(){
     <ul class="plist">
       ${room.players.map(p=>`<li><span class="avatar">${esc(initials(p.name))}</span> ${esc(p.name)}</li>`).join('')}
     </ul>
-    <div class="team-list" style="margin-top:14px;">
-      🗡️ مافيا: <b>${tallyObj.mafia}</b> &nbsp;·&nbsp; 🕯️ شيخ: <b>${tallyObj.sheikh}</b> &nbsp;·&nbsp; 🛡️ حامية: <b>${tallyObj.protector}</b> &nbsp;·&nbsp; 👤 مواطنين: <b>${tallyObj.citizen}</b>
-      <br><span style="font-size:12px;">(للتأكد إنو العدد مطابق للكروت الموزّعة بالواقع)</span>
-    </div>
+    <p class="footer-note">عدد الأدوار (مافيا/شيخ/حامية/مواطن) رح يظهرلك دفعة وحدة بعد ما تدوس "ابدأ" — عشان محدا يقدر يخمّن دور حدا من ترتيب الانضمام.</p>
     <div class="btn-stack" style="margin-top:18px;">
       <button class="btn btn-blood" data-act="start-game" ${canStart?'':'disabled'}>ابدأ الليلة الأولى</button>
       <button class="btn btn-ghost" data-act="go-home">إلغاء الغرفة</button>
@@ -435,8 +426,10 @@ function hostLobby(){
 
 function hostNight(){
   const a = actions || {mafiaVotes:{}, sheikhSubmitted:false};
-  const mafiaTotal = room.players.filter(p=>p.role==='mafia').length;
-  const hasSheikh = room.players.some(p=>p.role==='sheikh');
+  const tallyObj = {mafia:0, sheikh:0, protector:0, citizen:0};
+  room.players.forEach(p=>{ if(tallyObj[p.role]!==undefined) tallyObj[p.role]++; });
+  const mafiaTotal = tallyObj.mafia;
+  const hasSheikh = tallyObj.sheikh > 0;
   const mafiaVoted = Object.keys(a.mafiaVotes||{}).length;
   const sheikhDone = hasSheikh ? (a.sheikhSubmitted?1:0) : null;
   return `
@@ -444,6 +437,11 @@ function hostNight(){
     <p class="eyebrow">مراقبة الحكم</p>
     <h1>الليل نازل على البلدة...</h1>
     <p class="desc">كل واحد شايف دوره هلق على جواله. المافيا بتختار مين تسكّت، والشيخ بيسأل عن حدا. تقدر تنهي الليل بأي وقت.</p>
+
+    <div class="team-list" style="margin-bottom:16px;">
+      🗡️ مافيا: <b>${tallyObj.mafia}</b> &nbsp;·&nbsp; 🕯️ شيخ: <b>${tallyObj.sheikh}</b> &nbsp;·&nbsp; 🛡️ حامية: <b>${tallyObj.protector}</b> &nbsp;·&nbsp; 👤 مواطنين: <b>${tallyObj.citizen}</b>
+      <br><span style="font-size:12px;">(العدد النهائي بعد قفل الغرفة — للتأكد إنو مطابق للكروت الموزّعة)</span>
+    </div>
 
     <div class="progress-line"><span>تصويت المافيا</span><span>${mafiaVoted} / ${mafiaTotal}</span></div>
     <div class="bar-track"><div class="bar-fill" style="width:${mafiaTotal? Math.min(100,(mafiaVoted/mafiaTotal)*100):0}%"></div></div>
@@ -561,7 +559,6 @@ function playerNight(){
       </div>
       <div class="card"><p class="desc">جاري كشف الحقيقة لك سرّاً...</p></div>`;
     }
-    // مرة وحدة بس بالليلة: أول ما ينسأل، ما في رجوع لصندوق الإدخال خالص
     if(done){
       return `
       <div class="card">
