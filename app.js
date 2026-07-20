@@ -4,7 +4,7 @@
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import {
-  getDatabase, ref, set, update, get, onValue, off, remove
+  getDatabase, ref, set, update, get, onValue, off, remove, push
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
 
 /* ---------------- Firebase config (خاص بمشروعك) ---------------- */
@@ -48,11 +48,13 @@ let S = {
 };
 
 let room = null, actions = null, result = null;
+let mafiaChat = [];
 let joinSelectedRole = null;
 let sheikhSearchError = '';
 let sheikhTargetDraft = '';
+let chatDraft = '';
 
-let unsubRoom = null, unsubActions = null, unsubResult = null;
+let unsubRoom = null, unsubActions = null, unsubResult = null, unsubChat = null;
 
 /* ---------------- Firebase live listeners (replaces polling) ---------------- */
 function attachListeners(code){
@@ -60,6 +62,7 @@ function attachListeners(code){
   const roomRef = ref(db, 'rooms/'+code);
   const actionsRef = ref(db, 'actions/'+code);
   const resultRef = ref(db, 'result/'+code);
+  const chatRef = ref(db, 'mafiaChat/'+code);
 
   unsubRoom = onValue(roomRef, snap=>{
     const val = snap.val();
@@ -74,11 +77,17 @@ function attachListeners(code){
     result = snap.val();
     render();
   });
+  unsubChat = onValue(chatRef, snap=>{
+    const val = snap.val() || {};
+    mafiaChat = Object.values(val).sort((a,b)=>a.ts-b.ts);
+    render();
+  });
 }
 function detachListeners(){
   if(unsubRoom){ off(ref(db,'rooms/'+S.roomCode)); unsubRoom=null; }
   if(unsubActions){ off(ref(db,'actions/'+S.roomCode)); unsubActions=null; }
   if(unsubResult){ off(ref(db,'result/'+S.roomCode)); unsubResult=null; }
+  if(unsubChat){ off(ref(db,'mafiaChat/'+S.roomCode)); unsubChat=null; }
 }
 
 // Firebase stores players as an object keyed by id; we turn that into an array for easy rendering.
@@ -179,12 +188,11 @@ async function finishNight(){
   const a = snap.val() || {mafiaVotes:{}, sheikhTarget:null, sheikhVerdict:null};
   const silencedId = tally(a.mafiaVotes);
   const silencedName = silencedId ? (room.players.find(p=>p.id===silencedId)||{}).name : null;
-  const sheikhTargetName = a.sheikhTarget ? (room.players.find(p=>p.id===a.sheikhTarget)||{}).name : null;
   const res = {
     silencedId: silencedId || null,
     silencedName: silencedName || null,
-    sheikhTargetId: a.sheikhTarget || null,
-    sheikhTargetName: sheikhTargetName || null,
+    // عمدًا ما منخزّن اسم الشخص يلي سأل عنه الشيخ ولا اسم الشيخ — بس النتيجة العامة
+    sheikhAsked: !!a.sheikhTarget,
     sheikhVerdict: a.sheikhVerdict || null,
     computedAt: Date.now()
   };
@@ -196,17 +204,24 @@ async function endRound(){
   await update(ref(db, 'rooms/'+room.code), { phase: 'end' });
 }
 
+// كل رسالة إلها مفتاح فريد (push) عشان ما تصير رسالتين تكتبان بنفس اللحظة تلغي بعض
+async function sendMafiaChat(text){
+  const msgRef = push(ref(db, 'mafiaChat/'+S.roomCode));
+  await set(msgRef, { senderId: S.myId, senderName: S.myName, text, ts: Date.now() });
+}
+
 // host-only: wipes the whole room from the database (تنظيف بعد ما تخلص اللعبة)
 async function deleteRoom(code){
   await remove(ref(db, 'rooms/'+code));
   await remove(ref(db, 'actions/'+code));
   await remove(ref(db, 'result/'+code));
+  await remove(ref(db, 'mafiaChat/'+code));
 }
 
 function resetLocal(){
   detachListeners();
   S = { myId:null, myName:'', roomCode:null, isHost:false, view:'home', roleAcknowledged:false, sheikhResultAck:false, pendingVerdict:null, error:'' };
-  room=null; actions=null; result=null;
+  room=null; actions=null; result=null; mafiaChat=[]; chatDraft='';
   render();
 }
 
@@ -214,6 +229,9 @@ function resetLocal(){
 function render(){
   const app = document.getElementById('app');
   app.innerHTML = buildView();
+  // الصورة بتظهر بس بالصفحة الرئيسية الأولى (قبل ما ينشئ غرفة أو ينضم لأي قسم)
+  const isLandingHome = !S.roomCode && S.view === 'home';
+  document.body.classList.toggle('home-bg', isLandingHome);
   wireEvents();
 }
 
@@ -230,6 +248,13 @@ function wireEvents(){
     sheikhInput.oninput = (e)=>{ sheikhTargetDraft = e.target.value; };
     sheikhInput.onkeydown = (e)=>{ if(e.key==='Enter'){ handleAction('sheikh-submit', null); } };
   }
+  const chatInput = document.getElementById('inp-chat');
+  if(chatInput){
+    chatInput.oninput = (e)=>{ chatDraft = e.target.value; };
+    chatInput.onkeydown = (e)=>{ if(e.key==='Enter'){ handleAction('chat-send', null); } };
+  }
+  const chatScroll = document.getElementById('chat-scroll');
+  if(chatScroll){ chatScroll.scrollTop = chatScroll.scrollHeight; }
 }
 
 async function handleAction(act, val, el){
@@ -255,7 +280,17 @@ async function handleAction(act, val, el){
   if(act==='start-game'){ await startGame(); return; }
   if(act==='ack-role'){ S.roleAcknowledged = true; render(); return; }
   if(act==='mafia-vote'){ await submitMafiaVote(val); return; }
+  if(act==='chat-send'){
+    const box = document.getElementById('inp-chat');
+    const text = (box ? box.value : chatDraft).trim();
+    if(!text) return;
+    chatDraft = '';
+    await sendMafiaChat(text);
+    render();
+    return;
+  }
   if(act==='sheikh-submit'){
+    if(actions && actions.sheikhSubmitted){ return; } // قفل نهائي: سؤال واحد بس بالليلة
     const raw = document.getElementById('inp-sheikh-target').value.trim();
     sheikhSearchError = '';
     if(!raw){ sheikhSearchError = 'اكتب اسم الشخص أولاً.'; render(); return; }
@@ -491,6 +526,23 @@ function playerNight(){
           </div>`).join('')}
       </div>
       ${myVote? `<p class="hint">✅ صوّتّ. بانتظار الحكم يقفل الليل.</p>` : ''}
+
+      <hr class="div">
+      <div class="mafia-chat">
+        <div class="chat-title">🗡️ نقاش سرّي بين المافيا</div>
+        <div class="chat-messages" id="chat-scroll">
+          ${mafiaChat.length===0 ? `<div class="chat-empty">ابدأوا الحكي، محدا غيركم شايف هالمكان 🤫</div>` : ''}
+          ${mafiaChat.map(m=>`
+            <div class="chat-bubble ${m.senderId===S.myId?'me':''}">
+              <span class="chat-sender">${esc(m.senderName)}</span>
+              <span class="chat-text">${esc(m.text)}</span>
+            </div>`).join('')}
+        </div>
+        <div class="chat-input-row">
+          <input type="text" id="inp-chat" placeholder="اكتب رسالة لرفاقك بالمافيا..." value="${esc(chatDraft)}">
+          <button class="btn btn-primary chat-send" data-act="chat-send">↑</button>
+        </div>
+      </div>
     </div>`;
   }
 
@@ -509,11 +561,22 @@ function playerNight(){
       </div>
       <div class="card"><p class="desc">جاري كشف الحقيقة لك سرّاً...</p></div>`;
     }
+    // مرة وحدة بس بالليلة: أول ما ينسأل، ما في رجوع لصندوق الإدخال خالص
+    if(done){
+      return `
+      <div class="card">
+        <p class="eyebrow">دور الشيخ</p>
+        <h1>سألت الليلة، خلص</h1>
+        <p class="desc">استعملت سؤالك لهالليلة. خلي النتيجة بسرّك وانتظر الحكم يقفل الليل.</p>
+        <div class="spotlight-scene"><div class="eye"></div></div>
+        <p class="hint">✅ سألت. بانتظار الحكم يقفل الليل.</p>
+      </div>`;
+    }
     return `
     <div class="card">
       <p class="eyebrow">دور الشيخ</p>
       <h1>عن مين بدك تسأل؟</h1>
-      <p class="desc">اكتب اسم الشخص متل ما سجّله بالضبط، رح تعرف سرّاً إذا هو مافيا أو مواطن صالح.</p>
+      <p class="desc">اكتب اسم الشخص متل ما سجّله بالضبط — انتبه، بتقدر تسأل مرة وحدة بس هالليلة.</p>
       ${sheikhSearchError?`<div class="err">${esc(sheikhSearchError)}</div>`:''}
       <div class="field">
         <label class="flabel">اسم الشخص</label>
@@ -522,7 +585,6 @@ function playerNight(){
       <div class="btn-stack">
         <button class="btn btn-primary" data-act="sheikh-submit">اسأل عنه</button>
       </div>
-      ${done && S.sheikhResultAck? `<p class="hint">✅ سألت. بانتظار الحكم يقفل الليل.</p>` : ''}
     </div>`;
   }
 
@@ -545,7 +607,7 @@ function revealScreen(isHostView){
   if(!result) return `<div class="card"><p class="desc">جاري حساب النتيجة...</p></div>`;
   const silenced = result.silencedName;
   const hasSheikh = room.players.some(p=>p.role==='sheikh');
-  const sheikhAsked = !!result.sheikhTargetName;
+  const sheikhAsked = !!result.sheikhAsked;
   const isMafia = result.sheikhVerdict==='مافيا';
   return `
   <div class="card">
@@ -564,8 +626,7 @@ function revealScreen(isHostView){
     <div class="reveal-block d2">
       <div class="reveal-label">سؤال الشيخ</div>
       ${sheikhAsked ? `
-        <div class="reveal-name">${esc(result.sheikhTargetName)}</div>
-        <div class="reveal-badge ${isMafia?'badge-blood':'badge-green'}">${isMafia? '🗡️ مافيا' : '🕊️ بريء'}</div>
+        <div class="reveal-badge ${isMafia?'badge-blood':'badge-green'}" style="font-size:16px;">${isMafia? '🗡️ الشيخ سأل عن رجل مافيا' : '🕊️ الشيخ سأل عن رجل صالح'}</div>
       ` : `<div class="reveal-name">لم يسأل الشيخ</div><div class="reveal-badge badge-neutral">— </div>`}
     </div>` : ''}
 

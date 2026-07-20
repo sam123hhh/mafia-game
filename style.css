@@ -19,8 +19,9 @@
     margin:0;
     min-height:100vh;
     background:
-      radial-gradient(ellipse 60% 45% at 50% 0%, rgba(201,162,75,.10), transparent 60%),
-      radial-gradient(ellipse 90% 70% at 50% 100%, rgba(0,0,0,.6), transparent 60%),
+      radial-gradient(ellipse 70% 50% at 50% -8%, rgba(201,162,75,.15), transparent 60%),
+      radial-gradient(ellipse 100% 60% at 50% 108%, rgba(0,0,0,.65), transparent 65%),
+      radial-gradient(ellipse 140% 100% at 50% 50%, transparent 45%, rgba(0,0,0,.4) 100%),
       var(--void);
     color:var(--paper);
     font-family:'Almarai', sans-serif;
@@ -29,6 +30,16 @@
     justify-content:center;
     padding:28px 14px 60px;
     overflow-x:hidden;
+    transition: background .5s ease;
+  }
+  /* الخلفية المصوّرة بتظهر بس بالصفحة الرئيسية (قبل ما يفوت المستخدم لأي قسم) */
+  body.home-bg{
+    background:
+      radial-gradient(ellipse 60% 45% at 50% 0%, rgba(201,162,75,.10), transparent 60%),
+      radial-gradient(ellipse 90% 70% at 50% 100%, rgba(0,0,0,.6), transparent 60%),
+      linear-gradient(rgba(6,5,4,.72), rgba(6,5,4,.82)),
+      url('bg.jpg') 50% 35% / cover no-repeat,
+      var(--void);
   }
   body::before{
     content:"";
@@ -56,6 +67,15 @@
     letter-spacing:.5px;
     font-size:13px;
     margin-top:4px;
+    padding-bottom:12px;
+    position:relative;
+  }
+  .brand::after{
+    content:"";
+    position:absolute; bottom:0; left:50%; transform:translateX(-50%);
+    width:60px; height:1px;
+    background:linear-gradient(90deg, transparent, var(--brass-dim), transparent);
+    opacity:.6;
   }
   .brand .dot{width:6px;height:6px;border-radius:50%;background:var(--blood);box-shadow:0 0 8px var(--blood-glow);}
   .card{
@@ -315,3 +335,87 @@
   .link-btn{background:none; border:none; color:var(--brass-dim); text-decoration:underline; font-size:13px; cursor:pointer; padding:4px;}
   .link-btn:hover{color:var(--brass);}
   ::-webkit-scrollbar{width:5px;} ::-webkit-scrollbar-thumb{background:var(--brass-dim); border-radius:3px;}
+
+/* ---------------- mafia private night chat ---------------- */
+.mafia-chat{
+  margin-top:6px;
+  background:rgba(156,36,48,.06);
+  border:1px solid rgba(156,36,48,.25);
+  border-radius:14px;
+  padding:14px;
+}
+.chat-title{
+  font-family:'Tajawal', sans-serif;
+  font-weight:700;
+  font-size:14px;
+  color:#e17b84;
+  margin-bottom:10px;
+  display:flex; align-items:center; gap:6px;
+}
+.chat-messages{
+  max-height:180px;
+  overflow-y:auto;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin-bottom:10px;
+  padding-left:2px;
+}
+.chat-empty{
+  font-size:12.5px;
+  color:var(--paper-dim);
+  text-align:center;
+  padding:14px 6px;
+  font-style:italic;
+}
+.chat-bubble{
+  align-self:flex-start;
+  max-width:85%;
+  background:rgba(0,0,0,.28);
+  border:1px solid rgba(156,36,48,.2);
+  border-radius:12px 12px 12px 3px;
+  padding:8px 12px;
+  animation:fadeIn .25s ease;
+}
+.chat-bubble.me{
+  align-self:flex-end;
+  background:linear-gradient(135deg, rgba(156,36,48,.28), rgba(156,36,48,.14));
+  border-color:rgba(225,123,132,.35);
+  border-radius:12px 12px 3px 12px;
+}
+.chat-sender{
+  display:block;
+  font-size:10.5px;
+  color:#e17b84;
+  font-weight:700;
+  margin-bottom:2px;
+}
+.chat-bubble.me .chat-sender{ color:var(--brass); }
+.chat-text{
+  font-size:14px;
+  color:var(--paper);
+  line-height:1.5;
+  word-break:break-word;
+}
+.chat-input-row{
+  display:flex;
+  gap:8px;
+}
+.chat-input-row input{
+  flex:1;
+  background:rgba(0,0,0,.3);
+  border:1px solid rgba(156,36,48,.25);
+  color:var(--paper);
+  font-family:'Almarai',sans-serif;
+  font-size:14px;
+  padding:10px 12px;
+  border-radius:10px;
+  outline:none;
+}
+.chat-input-row input:focus{ border-color:#e17b84; }
+.chat-input-row .chat-send{
+  width:46px;
+  padding:0;
+  font-size:18px;
+  flex-shrink:0;
+}
