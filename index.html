@@ -9,12 +9,59 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="stage">
-  <div class="brand"><span class="dot"></span> ليلة المافيا — إدارة الليل</div>
-  <div id="app"><div class="card"><p class="desc">جاري التحميل...</p></div></div>
+
+<!-- زر فتح القائمة الجانبية -->
+<button id="sidebarToggleBtn" class="sidebar-toggle-btn" aria-label="القائمة">☰</button>
+
+<!-- القائمة الجانبية -->
+<div id="sidebarBackdrop" class="sidebar-backdrop"></div>
+<aside id="sidebar" class="sidebar">
+  <div class="sidebar-header">القائمة</div>
+  <button class="sidebar-link" id="openQuickToolBtn">🕵️ إدارة جولة سريعة</button>
+  <button class="sidebar-link" id="closeSidebarBtn">✖ إغلاق</button>
+</aside>
+
+<!-- اللعبة الرئيسية (الطاولة الافتراضية) -->
+<div class="stage" id="mainStage">
+  <div class="brand"><span class="dot"></span> ليلة المافيا</div>
+  <div id="mainGameApp"><div class="card"><p class="desc">جاري التحميل...</p></div></div>
 </div>
 
-<!-- app.js is a module: it imports Firebase directly from Google's CDN, no npm/build step needed -->
+<!-- لوحة الأداة السريعة الجانبية (تظهر فوق كل شي لما تنفتح) -->
+<div id="quickToolOverlay" class="quick-tool-overlay">
+  <div class="quick-tool-panel">
+    <button class="quick-tool-close" id="closeQuickToolBtn">✖ رجوع للعبة الرئيسية</button>
+    <div class="stage" style="padding-top:8px;">
+      <div class="brand"><span class="dot"></span> إدارة جولة سريعة — تسكيت وسؤال فقط</div>
+      <div id="quickToolApp"><div class="card"><p class="desc">جاري التحميل...</p></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- الوحدتان مستقلتان وتشتركان بنفس اتصال Firebase عن طريق firebase-init.js -->
+<script type="module" src="main-game.js"></script>
 <script type="module" src="app.js"></script>
+
+<script>
+  // تحكم بسيط بفتح/إغلاق القائمة الجانبية ولوحة الأداة السريعة (بدون حاجة لموديول)
+  const sidebar = document.getElementById('sidebar');
+  const backdrop = document.getElementById('sidebarBackdrop');
+  const quickToolOverlay = document.getElementById('quickToolOverlay');
+
+  function openSidebar(){ sidebar.classList.add('open'); backdrop.classList.add('show'); }
+  function closeSidebar(){ sidebar.classList.remove('open'); backdrop.classList.remove('show'); }
+
+  document.getElementById('sidebarToggleBtn').onclick = openSidebar;
+  document.getElementById('closeSidebarBtn').onclick = closeSidebar;
+  backdrop.onclick = closeSidebar;
+
+  document.getElementById('openQuickToolBtn').onclick = ()=>{
+    quickToolOverlay.classList.add('show');
+    closeSidebar();
+  };
+  document.getElementById('closeQuickToolBtn').onclick = ()=>{
+    quickToolOverlay.classList.remove('show');
+  };
+</script>
 </body>
 </html>

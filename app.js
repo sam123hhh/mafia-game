@@ -2,24 +2,10 @@
 // ليلة المافيا — منطق اللعبة، مربوط بقاعدة بيانات Firebase Realtime Database
 // ==========================================================================
 
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import {
-  getDatabase, ref, set, update, get, onValue, off, remove, push
+  ref, set, update, get, onValue, off, remove, push
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
-
-/* ---------------- Firebase config (خاص بمشروعك) ---------------- */
-const firebaseConfig = {
-  apiKey: "AIzaSyA6iSOCKWGXMxwAjXkjvQgaT36XhEuDqKk",
-  authDomain: "mafia-game-6dd99.firebaseapp.com",
-  databaseURL: "https://mafia-game-6dd99-default-rtdb.europe-west1.firebasedatabase.app",
-  projectId: "mafia-game-6dd99",
-  storageBucket: "mafia-game-6dd99.firebasestorage.app",
-  messagingSenderId: "912686202474",
-  appId: "1:912686202474:web:440d6a8a14e29a198b1413",
-};
-
-const fbApp = initializeApp(firebaseConfig);
-const db = getDatabase(fbApp);
+import { db } from "./firebase-init.js";
 
 /* ---------------- helpers ---------------- */
 function uid(){ return 'p_' + Math.random().toString(36).slice(2,10); }
@@ -229,6 +215,7 @@ async function finishNight(){
   const res = {
     silencedId: silencedId || null,
     silencedName: silencedName || null,
+    // عمدًا ما منخزّن اسم الشخص يلي سأل عنه الشيخ ولا اسم الشيخ — بس النتيجة العامة
     sheikhAsked: !!a.sheikhTarget,
     sheikhVerdict: a.sheikhVerdict || null,
     computedAt: Date.now()
@@ -264,16 +251,16 @@ function resetLocal(){
 
 /* ---------------- render ---------------- */
 function render(){
-  const app = document.getElementById('app');
+  const app = document.getElementById('quickToolApp');
+  if(!app) return; // اللوحة مسكرة/مش موجودة بالـ DOM هلق
   app.innerHTML = buildView();
-  // الصورة بتظهر بس بالصفحة الرئيسية الأولى (قبل ما ينشئ غرفة أو ينضم لأي قسم)
-  const isLandingHome = !S.roomCode && S.view === 'home';
-  document.body.classList.toggle('home-bg', isLandingHome);
   wireEvents();
 }
 
 function wireEvents(){
-  document.querySelectorAll('[data-act]').forEach(el=>{
+  const scope = document.getElementById('quickToolApp');
+  if(!scope) return;
+  scope.querySelectorAll('[data-act]').forEach(el=>{
     el.onclick = async (e)=>{
       ensureAudio(); // لازم إذن المستخدم قبل ما نقدر نشغّل صوت لاحقًا
       const act = el.getAttribute('data-act');
@@ -281,17 +268,17 @@ function wireEvents(){
       await handleAction(act, val, el);
     };
   });
-  const sheikhInput = document.getElementById('inp-sheikh-target');
+  const sheikhInput = scope.querySelector('#inp-sheikh-target');
   if(sheikhInput){
     sheikhInput.oninput = (e)=>{ sheikhTargetDraft = e.target.value; };
     sheikhInput.onkeydown = (e)=>{ if(e.key==='Enter'){ ensureAudio(); handleAction('sheikh-submit', null); } };
   }
-  const chatInput = document.getElementById('inp-chat');
+  const chatInput = scope.querySelector('#inp-chat');
   if(chatInput){
     chatInput.oninput = (e)=>{ chatDraft = e.target.value; };
     chatInput.onkeydown = (e)=>{ if(e.key==='Enter'){ ensureAudio(); handleAction('chat-send', null); } };
   }
-  const chatScroll = document.getElementById('chat-scroll');
+  const chatScroll = scope.querySelector('#chat-scroll');
   if(chatScroll){ chatScroll.scrollTop = chatScroll.scrollHeight; }
 }
 

@@ -419,3 +419,144 @@
   font-size:18px;
   flex-shrink:0;
 }
+
+/* =========================================================
+   القائمة الجانبية + لوحة الأداة السريعة العائمة
+   ========================================================= */
+.sidebar-toggle-btn{
+  position:fixed; top:16px; right:16px; z-index:60;
+  width:44px; height:44px; border-radius:12px;
+  background:var(--panel-2); border:1px solid var(--line);
+  color:var(--brass); font-size:20px; cursor:pointer;
+}
+.sidebar-backdrop{
+  position:fixed; inset:0; background:rgba(0,0,0,.55);
+  z-index:70; opacity:0; pointer-events:none; transition:opacity .25s ease;
+}
+.sidebar-backdrop.show{ opacity:1; pointer-events:auto; }
+.sidebar{
+  position:fixed; top:0; right:-280px; width:260px; height:100%;
+  background:var(--panel); border-left:1px solid var(--line);
+  z-index:80; padding:20px 16px; transition:right .3s ease;
+  display:flex; flex-direction:column; gap:10px;
+}
+.sidebar.open{ right:0; }
+.sidebar-header{ font-family:'Tajawal',sans-serif; font-weight:800; color:var(--brass); font-size:16px; margin-bottom:8px; }
+.sidebar-link{
+  background:rgba(0,0,0,.25); border:1px solid var(--line); color:var(--paper);
+  padding:12px 14px; border-radius:10px; font-family:'Almarai',sans-serif; font-size:14.5px;
+  text-align:right; cursor:pointer;
+}
+.sidebar-link:hover{ border-color:var(--brass-dim); }
+
+.quick-tool-overlay{
+  position:fixed; inset:0; z-index:90; background:var(--void);
+  opacity:0; pointer-events:none; transform:translateY(12px);
+  transition:opacity .25s ease, transform .25s ease;
+  overflow-y:auto;
+}
+.quick-tool-overlay.show{ opacity:1; pointer-events:auto; transform:translateY(0); }
+.quick-tool-close{
+  position:sticky; top:12px; margin:12px auto 0; display:block;
+  background:var(--panel-2); border:1px solid var(--line); color:var(--brass);
+  padding:10px 18px; border-radius:10px; font-family:'Tajawal',sans-serif; font-weight:700; cursor:pointer;
+  z-index:5;
+}
+
+/* =========================================================
+   الطاولة البيضاوية + المقاعد
+   ========================================================= */
+.oval-wrap{ width:100%; aspect-ratio:1/0.85; position:relative; margin:14px 0; }
+.oval-table{
+  position:absolute; inset:6%;
+  border-radius:50%;
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(201,162,75,.10), transparent 70%),
+    linear-gradient(160deg, #241a13, #150f0b);
+  border:3px solid var(--brass-dim);
+  box-shadow:inset 0 0 40px rgba(0,0,0,.6), 0 10px 30px rgba(0,0,0,.5);
+}
+.seat{
+  position:absolute; transform:translate(-50%,-50%);
+  width:64px; text-align:center; cursor:pointer;
+}
+.seat-name{
+  background:var(--panel-2); border:2px solid var(--brass-dim); border-radius:50%;
+  width:52px; height:52px; margin:0 auto; display:flex; align-items:center; justify-content:center;
+  font-size:11px; font-weight:700; color:var(--paper); overflow:hidden; padding:2px;
+  transition:.2s;
+}
+.seat.selected .seat-name{ border-color:var(--brass); box-shadow:0 0 14px var(--brass-glow); }
+.seat.removed .seat-name{ border-color:rgba(156,36,48,.5); opacity:.4; text-decoration:line-through; }
+.seat.is-silenced .seat-name{ border-color:var(--blood); box-shadow:0 0 14px var(--blood-glow); }
+.seat-warn{ font-size:9px; color:var(--blood); margin-top:3px; letter-spacing:1px; }
+
+.seat-actions{
+  background:rgba(0,0,0,.25); border:1px solid var(--line); border-radius:12px;
+  padding:12px 14px; margin-top:4px;
+}
+.seat-actions-title{ font-family:'Tajawal',sans-serif; font-weight:700; margin-bottom:10px; }
+.btn-row{ display:flex; gap:8px; flex-wrap:wrap; }
+.btn-row .btn{ width:auto; flex:1; min-width:110px; padding:10px 12px; font-size:13.5px; }
+
+/* =========================================================
+   مؤقت الجلسة — طبقة التجميد
+   ========================================================= */
+.freeze-overlay{
+  position:fixed; inset:0; z-index:95; background:rgba(0,0,0,.75);
+  display:flex; align-items:center; justify-content:center;
+  backdrop-filter:blur(2px);
+}
+.freeze-msg{
+  font-family:'Tajawal',sans-serif; font-weight:900; font-size:26px; color:var(--brass);
+  padding:20px 34px; border:2px solid var(--brass-dim); border-radius:16px; background:var(--panel-2);
+}
+
+/* =========================================================
+   عجلة الحظ
+   ========================================================= */
+.wheel-wrap{ position:relative; width:180px; height:180px; margin:10px auto; }
+.wheel-pointer{
+  position:absolute; top:-14px; left:50%; transform:translateX(-50%);
+  color:var(--brass); font-size:22px; z-index:2;
+}
+.wheel-disc{
+  width:180px; height:180px; border-radius:50%;
+  border:4px solid var(--brass-dim);
+  position:relative;
+  box-shadow:0 8px 24px rgba(0,0,0,.5);
+}
+.wheel-label{
+  position:absolute; top:50%; left:50%; transform-origin:0 0;
+  font-size:10px; color:#fff; font-weight:700; white-space:nowrap;
+  text-shadow:0 1px 2px rgba(0,0,0,.8);
+}
+
+/* =========================================================
+   كرت اللاعب القابل للقلب
+   ========================================================= */
+.flip-card{
+  width:150px; height:210px; margin:16px auto; cursor:pointer;
+  perspective:1000px;
+}
+.flip-card-inner{
+  position:relative; width:100%; height:100%;
+  transition:transform .5s; transform-style:preserve-3d;
+}
+.flip-card.flipped .flip-card-inner{ transform:rotateY(180deg); }
+.flip-face{
+  position:absolute; inset:0; backface-visibility:hidden;
+  border-radius:14px; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  border:2px solid var(--brass-dim);
+}
+.flip-back{
+  background:linear-gradient(160deg, var(--panel-2), var(--panel));
+  font-size:56px; color:var(--brass-dim);
+}
+.flip-front{
+  background:linear-gradient(160deg, var(--panel-2), var(--panel));
+  transform:rotateY(180deg);
+  border-color: var(--role-color, var(--brass));
+  box-shadow:0 0 24px var(--role-color, var(--brass-glow));
+}
+.flip-front .role-name{ font-family:'Tajawal',sans-serif; font-weight:900; font-size:15px; margin-top:8px; color:var(--paper); }
