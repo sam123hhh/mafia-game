@@ -27,8 +27,34 @@ function genCode(){ return String(Math.floor(1000 + Math.random()*9000)); }
 function initials(name){ return (name||'?').trim().slice(0,1).toUpperCase(); }
 function esc(s){ const d=document.createElement('div'); d.innerText = s==null?'':s; return d.innerHTML; }
 
+/* ---------------- إشارة اهتزاز/صوت لكل الأجهزة (بديل عن كلام الحكم وقت العيون المغمضة) ---------------- */
+let audioCtx = null;
+function ensureAudio(){
+  try{
+    if(!audioCtx){ audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }
+    else if(audioCtx.state === 'suspended'){ audioCtx.resume(); }
+  }catch(e){ /* المتصفح ما بيدعم، ولا مشكلة */ }
+}
+function fireCue(){
+  try{ if(navigator.vibrate){ navigator.vibrate([160]); } }catch(e){}
+  try{
+    if(audioCtx){
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 540;
+      gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.22, audioCtx.currentTime+0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime+0.4);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(); osc.stop(audioCtx.currentTime+0.42);
+    }
+  }catch(e){}
+}
+
 const ROLE_META = {
-  mafia:     { label:'مافيا',   icon:'🗡️', color:'#e17b84', glow:'rgba(156,36,48,.45)' },
+  mafia:          { label:'مافيا (صاحب القرار)', icon:'🗡️', color:'#e17b84', glow:'rgba(156,36,48,.45)' },
+  mafia_teammate: { label:'مافيا (نقاش فقط)',    icon:'🤐', color:'#e17b84', glow:'rgba(156,36,48,.45)' },
   sheikh:    { label:'الشيخ',   icon:'🕯️', color:'#c9a24b', glow:'rgba(201,162,75,.4)' },
   protector: { label:'الحامية', icon:'🛡️', color:'#7fc9a0', glow:'rgba(63,125,92,.4)' },
   citizen:   { label:'مواطن صالح', icon:'👤', color:'#c9a24b', glow:'rgba(201,162,75,.3)' },
@@ -57,8 +83,12 @@ let chatDraft = '';
 let unsubRoom = null, unsubActions = null, unsubResult = null, unsubChat = null;
 
 /* ---------------- Firebase live listeners (replaces polling) ---------------- */
+let prevMafiaDecided = false, prevSheikhSubmitted = false;
+
 function attachListeners(code){
   detachListeners();
+  prevMafiaDecided = false;
+  prevSheikhSubmitted = false;
   const roomRef = ref(db, 'rooms/'+code);
   const actionsRef = ref(db, 'actions/'+code);
   const resultRef = ref(db, 'result/'+code);
@@ -70,7 +100,12 @@ function attachListeners(code){
     render();
   });
   unsubActions = onValue(actionsRef, snap=>{
-    actions = snap.val() || {mafiaVotes:{}, sheikhTarget:null, sheikhVerdict:null, sheikhSubmitted:false};
+    const newActions = snap.val() || {mafiaVotes:{}, mafiaDecided:false, sheikhTarget:null, sheikhVerdict:null, sheikhSubmitted:false};
+    if(newActions.mafiaDecided && !prevMafiaDecided){ fireCue(); }
+    if(newActions.sheikhSubmitted && !prevSheikhSubmitted){ fireCue(); }
+    prevMafiaDecided = !!newActions.mafiaDecided;
+    prevSheikhSubmitted = !!newActions.sheikhSubmitted;
+    actions = newActions;
     render();
   });
   unsubResult = onValue(resultRef, snap=>{
@@ -129,6 +164,7 @@ async function joinRoom(code, name, role){
     render(); return;
   }
   const myId = uid();
+  // writing to our own unique key — safe even if many people join at the same instant
   await set(ref(db, `rooms/${code}/players/${myId}`), { name: cleanName || 'لاعب', role, isHost:false });
   S.myId = myId;
   S.myName = cleanName || 'لاعب';
@@ -150,12 +186,16 @@ async function startGame(){
     render(); return;
   }
   S.error = '';
-  await set(ref(db, 'actions/'+room.code), { mafiaVotes:{}, sheikhTarget:null, sheikhVerdict:null, sheikhSubmitted:false });
+  await set(ref(db, 'actions/'+room.code), { mafiaVotes:{}, mafiaDecided:false, sheikhTarget:null, sheikhVerdict:null, sheikhSubmitted:false });
   await update(ref(db, 'rooms/'+room.code), { phase: 'night' });
 }
 
 async function submitMafiaVote(targetId){
-  await set(ref(db, `actions/${S.roomCode}/mafiaVotes/${S.myId}`), targetId);
+  // قرار واحد نهائي: نكتب الاختيار ونقفل الليل على المافيا بنفس اللحظة
+  await update(ref(db, `actions/${S.roomCode}`), {
+    [`mafiaVotes/${S.myId}`]: targetId,
+    mafiaDecided: true
+  });
 }
 
 async function submitSheikhTarget(targetId){
@@ -201,11 +241,13 @@ async function endRound(){
   await update(ref(db, 'rooms/'+room.code), { phase: 'end' });
 }
 
+// كل رسالة إلها مفتاح فريد (push) عشان ما تصير رسالتين تكتبان بنفس اللحظة تلغي بعض
 async function sendMafiaChat(text){
   const msgRef = push(ref(db, 'mafiaChat/'+S.roomCode));
   await set(msgRef, { senderId: S.myId, senderName: S.myName, text, ts: Date.now() });
 }
 
+// host-only: wipes the whole room from the database (تنظيف بعد ما تخلص اللعبة)
 async function deleteRoom(code){
   await remove(ref(db, 'rooms/'+code));
   await remove(ref(db, 'actions/'+code));
@@ -224,6 +266,7 @@ function resetLocal(){
 function render(){
   const app = document.getElementById('app');
   app.innerHTML = buildView();
+  // الصورة بتظهر بس بالصفحة الرئيسية الأولى (قبل ما ينشئ غرفة أو ينضم لأي قسم)
   const isLandingHome = !S.roomCode && S.view === 'home';
   document.body.classList.toggle('home-bg', isLandingHome);
   wireEvents();
@@ -232,6 +275,7 @@ function render(){
 function wireEvents(){
   document.querySelectorAll('[data-act]').forEach(el=>{
     el.onclick = async (e)=>{
+      ensureAudio(); // لازم إذن المستخدم قبل ما نقدر نشغّل صوت لاحقًا
       const act = el.getAttribute('data-act');
       const val = el.getAttribute('data-val');
       await handleAction(act, val, el);
@@ -240,12 +284,12 @@ function wireEvents(){
   const sheikhInput = document.getElementById('inp-sheikh-target');
   if(sheikhInput){
     sheikhInput.oninput = (e)=>{ sheikhTargetDraft = e.target.value; };
-    sheikhInput.onkeydown = (e)=>{ if(e.key==='Enter'){ handleAction('sheikh-submit', null); } };
+    sheikhInput.onkeydown = (e)=>{ if(e.key==='Enter'){ ensureAudio(); handleAction('sheikh-submit', null); } };
   }
   const chatInput = document.getElementById('inp-chat');
   if(chatInput){
     chatInput.oninput = (e)=>{ chatDraft = e.target.value; };
-    chatInput.onkeydown = (e)=>{ if(e.key==='Enter'){ handleAction('chat-send', null); } };
+    chatInput.onkeydown = (e)=>{ if(e.key==='Enter'){ ensureAudio(); handleAction('chat-send', null); } };
   }
   const chatScroll = document.getElementById('chat-scroll');
   if(chatScroll){ chatScroll.scrollTop = chatScroll.scrollHeight; }
@@ -273,7 +317,12 @@ async function handleAction(act, val, el){
   }
   if(act==='start-game'){ await startGame(); return; }
   if(act==='ack-role'){ S.roleAcknowledged = true; render(); return; }
-  if(act==='mafia-vote'){ await submitMafiaVote(val); return; }
+  if(act==='mafia-vote'){
+    if(myRole()!=='mafia') return; // بس صاحب القرار يقدر يسكت
+    if(actions && actions.mafiaDecided) return; // قرار واحد نهائي
+    await submitMafiaVote(val);
+    return;
+  }
   if(act==='chat-send'){
     const box = document.getElementById('inp-chat');
     const text = (box ? box.value : chatDraft).trim();
@@ -284,7 +333,7 @@ async function handleAction(act, val, el){
     return;
   }
   if(act==='sheikh-submit'){
-    if(actions && actions.sheikhSubmitted){ return; }
+    if(actions && actions.sheikhSubmitted){ return; } // قفل نهائي: سؤال واحد بس بالليلة
     const raw = document.getElementById('inp-sheikh-target').value.trim();
     sheikhSearchError = '';
     if(!raw){ sheikhSearchError = 'اكتب اسم الشخص أولاً.'; render(); return; }
@@ -354,10 +403,11 @@ function viewHostSetup(){
 
 function viewJoin(){
   const roleOptions = [
-    {key:'citizen',   label:'مواطن صالح', icon:'👤'},
-    {key:'mafia',     label:'مافيا',       icon:'🗡️'},
-    {key:'sheikh',    label:'الشيخ',       icon:'🕯️'},
-    {key:'protector', label:'الحامية',     icon:'🛡️'},
+    {key:'citizen',        label:'مواطن صالح',        icon:'👤'},
+    {key:'mafia',          label:'مافيا (صاحب القرار)', icon:'🗡️'},
+    {key:'mafia_teammate', label:'مافيا (نقاش فقط)',   icon:'🤐'},
+    {key:'sheikh',         label:'الشيخ',              icon:'🕯️'},
+    {key:'protector',      label:'الحامية',            icon:'🛡️'},
   ];
   return `
   <div class="card">
@@ -400,7 +450,7 @@ function viewHostFlow(){
 }
 
 function hostLobby(){
-  const tallyObj = {mafia:0, sheikh:0, protector:0, citizen:0};
+  const tallyObj = {mafia:0, mafia_teammate:0, sheikh:0, protector:0, citizen:0};
   room.players.forEach(p=>{ if(tallyObj[p.role]!==undefined) tallyObj[p.role]++; });
   const canStart = room.players.length >= 2 && tallyObj.mafia >= 1;
   return `
@@ -416,7 +466,7 @@ function hostLobby(){
     <ul class="plist">
       ${room.players.map(p=>`<li><span class="avatar">${esc(initials(p.name))}</span> ${esc(p.name)}</li>`).join('')}
     </ul>
-    <p class="footer-note">عدد الأدوار (مافيا/شيخ/حامية/مواطن) رح يظهرلك دفعة وحدة بعد ما تدوس "ابدأ" — عشان محدا يقدر يخمّن دور حدا من ترتيب الانضمام.</p>
+    <p class="footer-note">عدد الأدوار رح يظهرلك دفعة وحدة بعد ما تدوس "ابدأ" — عشان محدا يقدر يخمّن دور حدا من ترتيب الانضمام.</p>
     <div class="btn-stack" style="margin-top:18px;">
       <button class="btn btn-blood" data-act="start-game" ${canStart?'':'disabled'}>ابدأ الليلة الأولى</button>
       <button class="btn btn-ghost" data-act="go-home">إلغاء الغرفة</button>
@@ -425,26 +475,25 @@ function hostLobby(){
 }
 
 function hostNight(){
-  const a = actions || {mafiaVotes:{}, sheikhSubmitted:false};
-  const tallyObj = {mafia:0, sheikh:0, protector:0, citizen:0};
+  const a = actions || {mafiaVotes:{}, mafiaDecided:false, sheikhSubmitted:false};
+  const tallyObj = {mafia:0, mafia_teammate:0, sheikh:0, protector:0, citizen:0};
   room.players.forEach(p=>{ if(tallyObj[p.role]!==undefined) tallyObj[p.role]++; });
-  const mafiaTotal = tallyObj.mafia;
   const hasSheikh = tallyObj.sheikh > 0;
-  const mafiaVoted = Object.keys(a.mafiaVotes||{}).length;
+  const mafiaDone = a.mafiaDecided ? 1 : 0;
   const sheikhDone = hasSheikh ? (a.sheikhSubmitted?1:0) : null;
   return `
   <div class="card">
     <p class="eyebrow">مراقبة الحكم</p>
     <h1>الليل نازل على البلدة...</h1>
-    <p class="desc">كل واحد شايف دوره هلق على جواله. المافيا بتختار مين تسكّت، والشيخ بيسأل عن حدا. تقدر تنهي الليل بأي وقت.</p>
+    <p class="desc">كل واحد شايف دوره هلق على جواله. صاحب قرار المافيا بيختار مين يسكّت، والشيخ بيسأل عن حدا. تقدر تنهي الليل بأي وقت.</p>
 
     <div class="team-list" style="margin-bottom:16px;">
-      🗡️ مافيا: <b>${tallyObj.mafia}</b> &nbsp;·&nbsp; 🕯️ شيخ: <b>${tallyObj.sheikh}</b> &nbsp;·&nbsp; 🛡️ حامية: <b>${tallyObj.protector}</b> &nbsp;·&nbsp; 👤 مواطنين: <b>${tallyObj.citizen}</b>
+      🗡️ مافيا (قرار): <b>${tallyObj.mafia}</b> &nbsp;·&nbsp; 🤐 مافيا (نقاش): <b>${tallyObj.mafia_teammate}</b> &nbsp;·&nbsp; 🕯️ شيخ: <b>${tallyObj.sheikh}</b> &nbsp;·&nbsp; 🛡️ حامية: <b>${tallyObj.protector}</b> &nbsp;·&nbsp; 👤 مواطنين: <b>${tallyObj.citizen}</b>
       <br><span style="font-size:12px;">(العدد النهائي بعد قفل الغرفة — للتأكد إنو مطابق للكروت الموزّعة)</span>
     </div>
 
-    <div class="progress-line"><span>تصويت المافيا</span><span>${mafiaVoted} / ${mafiaTotal}</span></div>
-    <div class="bar-track"><div class="bar-fill" style="width:${mafiaTotal? Math.min(100,(mafiaVoted/mafiaTotal)*100):0}%"></div></div>
+    <div class="progress-line"><span>قرار المافيا</span><span>${mafiaDone? 'تم':'بالانتظار'}</span></div>
+    <div class="bar-track"><div class="bar-fill" style="width:${mafiaDone?100:0}%"></div></div>
 
     ${hasSheikh ? `
     <div class="progress-line"><span>سؤال الشيخ</span><span>${sheikhDone? 'تم':'بالانتظار'}</span></div>
@@ -482,13 +531,31 @@ function playerLobby(){
   </div>`;
 }
 
+// شاشة انتظار موحّدة 100%: أي حدا يخلص دوره (مافيا قررت، الشيخ سأل، مواطن أو حامية من البداية)
+// بيوصل لنفس الشاشة بالضبط — بدون أي كلمة أو أيقونة تكشف الدور، حتى لو تبادلتوا التلفونات.
+function waitingScreen(){
+  return `
+  <div class="card">
+    <p class="eyebrow">انتظار</p>
+    <h1>الليل مستمر... خلّي عينيك مسكرة</h1>
+    <div class="spotlight-scene">
+      <div style="text-align:center;">
+        <div class="eye"></div>
+        <div class="dots"><span></span><span></span><span></span></div>
+      </div>
+    </div>
+    <p class="desc" style="text-align:center;">خلصت جزئيتك. استنى الحكم يعلن نتيجة الليلة للجميع.</p>
+  </div>`;
+}
+
 function playerNight(){
   const role = myRole();
   if(!role) return `<div class="card"><p class="desc">جاري التحميل...</p></div>`;
 
   if(!S.roleAcknowledged){
     const meta = ROLE_META[role];
-    const teammates = role==='mafia' ? room.players.filter(p=> p.role==='mafia' && p.id!==S.myId) : [];
+    const isMafiaTeam = role==='mafia' || role==='mafia_teammate';
+    const teammates = isMafiaTeam ? room.players.filter(p=> (p.role==='mafia'||p.role==='mafia_teammate') && p.id!==S.myId) : [];
     return `
     <div class="card">
       <p class="eyebrow">تأكيد الهوية</p>
@@ -506,25 +573,13 @@ function playerNight(){
     </div>`;
   }
 
-  if(role==='mafia'){
-    const others = room.players.filter(p=> p.role!=='mafia');
-    const myVote = (actions && actions.mafiaVotes) ? actions.mafiaVotes[S.myId] : null;
-    const counts = {};
-    Object.values((actions&&actions.mafiaVotes)||{}).forEach(t=>counts[t]=(counts[t]||0)+1);
-    return `
-    <div class="card">
-      <p class="eyebrow">دور المافيا</p>
-      <h1>مين بدكم تسكّتوا الليلة؟</h1>
-      <p class="desc">اختار الشخص. تقدر تغيّر صوتك لحد ما الحكم يقفل الليل.</p>
-      <div class="targets">
-        ${others.map(p=>`
-          <div class="target-btn ${myVote===p.id?'selected':''}" data-act="mafia-vote" data-val="${p.id}">
-            <span class="avatar">${esc(initials(p.name))}</span> ${esc(p.name)}
-            ${counts[p.id]?`<span class="vcount">${counts[p.id]} صوت</span>`:''}
-          </div>`).join('')}
-      </div>
-      ${myVote? `<p class="hint">✅ صوّتّ. بانتظار الحكم يقفل الليل.</p>` : ''}
+  if(role==='mafia' || role==='mafia_teammate'){
+    const isBoss = role==='mafia';
+    const decided = actions && actions.mafiaDecided;
+    // أول ما يتقرر القرار، الكل (صاحب القرار ورفاقه) بيوصلوا لنفس شاشة الانتظار الموحّدة
+    if(decided) return waitingScreen();
 
+    const chatPanel = `
       <hr class="div">
       <div class="mafia-chat">
         <div class="chat-title">🗡️ نقاش سرّي بين المافيا</div>
@@ -540,7 +595,32 @@ function playerNight(){
           <input type="text" id="inp-chat" placeholder="اكتب رسالة لرفاقك بالمافيا..." value="${esc(chatDraft)}">
           <button class="btn btn-primary chat-send" data-act="chat-send">↑</button>
         </div>
-      </div>
+      </div>`;
+
+    if(isBoss){
+      const others = room.players.filter(p=> p.role!=='mafia' && p.role!=='mafia_teammate');
+      return `
+      <div class="card">
+        <p class="eyebrow">دور المافيا</p>
+        <h1>مين بدك تسكّت الليلة؟</h1>
+        <p class="desc">القرار إلك لحالك. اختار الشخص — انتبه، اختيارك نهائي وبيقفل فورًا.</p>
+        <div class="targets">
+          ${others.map(p=>`
+            <div class="target-btn" data-act="mafia-vote" data-val="${p.id}">
+              <span class="avatar">${esc(initials(p.name))}</span> ${esc(p.name)}
+            </div>`).join('')}
+        </div>
+        ${chatPanel}
+      </div>`;
+    }
+
+    // عضو مافيا للنقاش فقط — يشوف الشات، ما إله زر تسكيت خالص
+    return `
+    <div class="card">
+      <p class="eyebrow">دور المافيا</p>
+      <h1>ساعد رفيقك يقرر</h1>
+      <p class="desc">أنت هون بس تتناقش — صاحب القرار غيرك رح يسكت لحاله ولما يقرر بتوصلك نفس شاشة الانتظار.</p>
+      ${chatPanel}
     </div>`;
   }
 
@@ -559,16 +639,8 @@ function playerNight(){
       </div>
       <div class="card"><p class="desc">جاري كشف الحقيقة لك سرّاً...</p></div>`;
     }
-    if(done){
-      return `
-      <div class="card">
-        <p class="eyebrow">دور الشيخ</p>
-        <h1>سألت الليلة، خلص</h1>
-        <p class="desc">استعملت سؤالك لهالليلة. خلي النتيجة بسرّك وانتظر الحكم يقفل الليل.</p>
-        <div class="spotlight-scene"><div class="eye"></div></div>
-        <p class="hint">✅ سألت. بانتظار الحكم يقفل الليل.</p>
-      </div>`;
-    }
+    // مرة وحدة بس بالليلة: أول ما ينسأل، بيوصل لنفس شاشة الانتظار الموحّدة
+    if(done) return waitingScreen();
     return `
     <div class="card">
       <p class="eyebrow">دور الشيخ</p>
@@ -585,18 +657,8 @@ function playerNight(){
     </div>`;
   }
 
-  return `
-  <div class="card">
-    <p class="eyebrow">${ROLE_META[role].label}</p>
-    <h1>الليل مظلم... اسكت وانتظر</h1>
-    <div class="spotlight-scene">
-      <div style="text-align:center;">
-        <div class="eye"></div>
-        <div class="dots"><span></span><span></span><span></span></div>
-      </div>
-    </div>
-    <p class="desc" style="text-align:center;">في ناس عم يتحركوا بالظلام الآن... خلي عيونك مغمضة لحد ما يعلن الحكم.</p>
-  </div>`;
+  // مواطن صالح أو حامية: ما إلهم شي يعملوه، فعلى طول نفس شاشة الانتظار الموحّدة
+  return waitingScreen();
 }
 
 /* ---------------- REVEAL & END ---------------- */
