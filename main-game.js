@@ -207,6 +207,27 @@ async function mgEliminateVote(seatId){
   mgRender();
 }
 
+// إنهاء الطاولة نهائيًا (متاح للهوست بأي وقت — من بداية اللعبة لآخرها)
+async function mgEndGame(){
+  if(!confirm('متأكد إنك بدك تنهي الطاولة نهائيًا؟ هاد بيمسح كل بيانات هالجلسة.')) return;
+  const code = mg.roomCode;
+  await remove(ref(db,'mainGames/'+code));
+  await remove(ref(db,'mainActions/'+code));
+  await remove(ref(db,'mainHistory/'+code));
+  await remove(ref(db,'mainChat/'+code));
+  mgResetLocal();
+}
+
+// نقل القيادة لأحد الجالسين — بيحتاج يكون هالشخص منضم فعليًا من جواله
+async function mgTransferHost(targetSeatId){
+  const seat = mgRoom.seats[targetSeatId];
+  if(!seat || !seat.playerId){ alert('هالشخص لسا ما انضم من جواله، ما فيك تنقل القيادة إله.'); return; }
+  if(!confirm(`متأكد إنك بدك تنقل القيادة لـ ${seat.name}؟ رح توصله شاشة التحكم فورًا.`)) return;
+  await update(ref(db,'mainGames/'+mg.roomCode), { hostId: seat.playerId });
+  mg.selectedSeatId = null;
+  mgRender();
+}
+
 /* ---------------- انضمام لاعب لمقعد ---------------- */
 async function mgJoinSeat(code, seatId, name){
   code = code.trim();
@@ -286,7 +307,7 @@ async function mgStartNextRound(){
   const nextRound = (mgRoom.round||1) + 1;
   await update(ref(db,'mainGames/'+mg.roomCode), { round: nextRound, phase:'night' });
   await set(ref(db,'mainActions/'+mg.roomCode), mgFreshActionsObj());
-  await remove(ref(db,'mainChat/'+mg.roomCode));
+  await remove(ref(db,'mainChat/'+mg.roomCode)); // شات المافيا يتجدد كل جولة
   timerResetRoundLock();
   mg.selectedSeatId = null;
   mgRender();
@@ -435,6 +456,8 @@ async function mgHandleAction(act, val){
   if(act==='mg-remove-seat'){ await mgRemoveSeat(val); return; }
   if(act==='mg-restore-seat'){ await mgRestoreSeat(val); return; }
   if(act==='mg-eliminate-vote'){ await mgEliminateVote(val); return; }
+  if(act==='mg-end-game'){ await mgEndGame(); return; }
+  if(act==='mg-transfer-host'){ await mgTransferHost(val); return; }
   if(act==='mg-deal'){ await mgDealCards(); return; }
   if(act==='mg-finish-night'){ await mgFinishNight(); return; }
   if(act==='mg-next-round'){ await mgStartNextRound(); return; }
@@ -522,13 +545,20 @@ function mgMyRole(){
 }
 
 /* ---------------- views ---------------- */
+function mgAmHost(){
+  return !!(mgRoom && mg.myId && mgRoom.hostId === mg.myId);
+}
+
 function mgBuildView(){
   if(!mg.roomCode){
     if(mg.view==='host-setup') return mgViewHostSetup();
     if(mg.view==='player-join') return mgViewPlayerJoin();
     return mgViewLanding();
   }
-  if(mg.isHost) return mgViewHostFlow();
+  if(!mgRoom){
+    return `<div class="card"><p class="desc">جاري التحميل...</p><button class="btn btn-ghost" data-act="mg-go-home" style="margin-top:12px;">رجوع للرئيسية</button></div>`;
+  }
+  if(mgAmHost()) return mgViewHostFlow();
   return mgViewPlayerFlow();
 }
 
@@ -660,6 +690,9 @@ function mgViewHostTable(){
           `<button class="btn btn-ghost" data-act="mg-restore-seat" data-val="${mg.selectedSeatId}">↩️ استرجاع</button>`}
         ${phase==='day' && selected.status==='active' ?
           `<button class="btn btn-blood" data-act="mg-eliminate-vote" data-val="${mg.selectedSeatId}">🗳️ إقصاء (تصويت)</button>` : ''}
+        ${selected.playerId ?
+          `<button class="btn btn-ghost" data-act="mg-transfer-host" data-val="${mg.selectedSeatId}">👑 نقل القيادة إله</button>` :
+          `<span class="footer-note" style="margin:0;">(لسا ما انضم من جواله، ما فيك تنقل القيادة إله)</span>`}
       </div>
     </div>` : `<p class="footer-note">دوس على أي مقعد لإدارته${phase==='day'?' أو لإقصائه بالتصويت':''}.</p>`}
 
@@ -676,6 +709,9 @@ function mgViewHostTable(){
     ${mgTimerPanel()}
     <hr class="div">
     ${mgWheelPanel(seatsArr)}
+
+    <hr class="div">
+    <button class="btn btn-ghost" data-act="mg-end-game" style="border-color:rgba(156,36,48,.4); color:#e17b84;">🛑 إنهاء الطاولة نهائيًا</button>
   </div>
   ${timerFrozen? `
     <div class="freeze-overlay">
@@ -802,7 +838,14 @@ function mgViewPlayerFlow(){
 function mgViewPlayerTableInner(){
   if(!mgRoom) return `<div class="card"><p class="desc">جاري التحميل...</p><button class="btn btn-ghost" data-act="mg-go-home" style="margin-top:12px;">رجوع للرئيسية</button></div>`;
   const found = mgMySeat();
-  if(!found) return `<div class="card"><p class="desc">جاري ربط مقعدك...</p></div>`;
+  if(!found){
+    return `
+    <div class="card">
+      <p class="eyebrow">مشاهدة</p>
+      <h1>ما إلك مقعد عالطاولة</h1>
+      <p class="desc">إذا كنت الحكم الأصلي ونقلت القيادة لحدا تاني، هلق بس تتفرج. إذا لسا عم تنضم، استنى ثانية.</p>
+    </div>`;
+  }
   const [seatId, seat] = found;
   const round = mgRoom.round||1;
 
@@ -863,26 +906,17 @@ function mgViewPlayerTableInner(){
     const isSilencer = seat.role==='silencer';
     const canActThisRound = isSilencer || round>=2;
     const decided = isSilencer ? (mgActions && mgActions.silencerDecided) : (mgActions && mgActions.assassinDecided);
-    const chatPanel = mgMafiaChatPanel();
 
     if(!canActThisRound){
       return `
       <div class="card">
         <p class="eyebrow">${meta.label}</p>
         <h1>ما إلك فعل هالجولة بعد</h1>
-        <p class="desc">دورك بيبلش فعليًا من الجولة الثانية. هلق بس تقدر تتناقش مع رفيقك بالمافيا.</p>
-        ${chatPanel}
+        <p class="desc">دورك بيبلش فعليًا من الجولة الثانية.</p>
       </div>`;
     }
-    if(decided){
-      return `
-      <div class="card">
-        <p class="eyebrow">${meta.label}</p>
-        <h1>قررت لهالليلة</h1>
-        <p class="desc">استنى الباقي، وفيك تكمّل تتناقش مع رفيقك.</p>
-        ${chatPanel}
-      </div>`;
-    }
+    if(decided) return mgWaitingScreen(round);
+
     const others = Object.entries(mgRoom.seats).filter(([id,s])=> s.status==='active' && !MG_MAFIA_ROLES.includes(s.role) && id!==seatId);
     const act = isSilencer ? 'mg-silence-submit' : 'mg-assassin-submit';
     return `
@@ -893,7 +927,7 @@ function mgViewPlayerTableInner(){
       <div class="targets">
         ${others.map(([id,s])=>`<div class="target-btn" data-act="${act}" data-val="${id}"><span class="avatar">${esc(mgInitials(s.name))}</span> ${esc(s.name)}</div>`).join('')}
       </div>
-      ${chatPanel}
+      ${mgMafiaChatPanel()}
     </div>`;
   }
 
@@ -947,17 +981,8 @@ function mgViewPlayerTableInner(){
 }
 
 function mgWaitingScreen(round){
-  const currentResult = mgHistory[round];
-  if(currentResult){
-    return `
-    <div class="card">
-      <p class="eyebrow">كشف نتيجة الليلة</p>
-      <h1>الصباح وصل...</h1>
-      ${mgResultBannerHtml(currentResult)}
-      <p class="hint" style="margin-top:14px;">استنوا الحكم يكمّل اللعبة.</p>
-    </div>`;
-  }
-  const prevResult = round>1 ? mgHistory[round-1] : null;
+  // النتيجة (مين تسكّت/انغتال، جواب الشيخ، صح/غلط الحامية) ما بتبين للاعبين خالص —
+  // بس الهوست يشوفها ويعلنها بصوته بالواقع. اللاعب يضل بنفس شاشة الانتظار الموحّدة.
   return `
   <div class="card">
     <p class="eyebrow">انتظار</p>
@@ -968,8 +993,7 @@ function mgWaitingScreen(round){
         <div class="dots"><span></span><span></span><span></span></div>
       </div>
     </div>
-    <p class="desc" style="text-align:center;">خلصت جزئيتك. استنى الحكم.</p>
-    ${prevResult? `<hr class="div"><p class="flabel">تقرير الجولة ${round-1}</p>${mgResultBannerHtml(prevResult)}` : ''}
+    <p class="desc" style="text-align:center;">خلصت جزئيتك. استنى الحكم يعلن النتيجة بصوته.</p>
   </div>`;
 }
 
