@@ -560,3 +560,6 @@
   box-shadow:0 0 24px var(--role-color, var(--brass-glow));
 }
 .flip-front .role-name{ font-family:'Tajawal',sans-serif; font-weight:900; font-size:15px; margin-top:8px; color:var(--paper); }
+
+/* عنصر "تاغ" عام قابل لإعادة الاستخدام خارج قوائم اللاعبين */
+.tag{ font-size:11.5px; color:var(--paper-dim); }

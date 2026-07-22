@@ -120,6 +120,24 @@ function normalizeRoom(val){
 }
 
 /* ---------------- actions (all writes go straight to Firebase) ---------------- */
+function qtSaveSession(){
+  try{ localStorage.setItem('qt_session', JSON.stringify({roomCode:S.roomCode, myId:S.myId, myName:S.myName, isHost:S.isHost})); }catch(e){}
+}
+function qtClearSession(){
+  try{ localStorage.removeItem('qt_session'); }catch(e){}
+}
+function qtTryRestoreSession(){
+  try{
+    const raw = localStorage.getItem('qt_session');
+    if(!raw) return;
+    const s = JSON.parse(raw);
+    if(s && s.roomCode && s.myId){
+      S.roomCode = s.roomCode; S.myId = s.myId; S.myName = s.myName||''; S.isHost = !!s.isHost;
+      attachListeners(s.roomCode);
+    }
+  }catch(e){}
+}
+
 async function createRoom(hostName){
   S.myId = uid();
   S.myName = hostName || 'الحكم';
@@ -135,6 +153,7 @@ async function createRoom(hostName){
   S.roomCode = code;
   S.view = 'host-lobby';
   attachListeners(code);
+  qtSaveSession();
 }
 
 async function joinRoom(code, name, role){
@@ -158,6 +177,7 @@ async function joinRoom(code, name, role){
   S.roomCode = code;
   S.view = 'player-lobby';
   attachListeners(code);
+  qtSaveSession();
 }
 
 async function startGame(){
@@ -246,6 +266,7 @@ function resetLocal(){
   detachListeners();
   S = { myId:null, myName:'', roomCode:null, isHost:false, view:'home', roleAcknowledged:false, sheikhResultAck:false, pendingVerdict:null, error:'' };
   room=null; actions=null; result=null; mafiaChat=[]; chatDraft='';
+  qtClearSession();
   render();
 }
 
@@ -695,4 +716,5 @@ function endScreen(isHostView){
   </div>`;
 }
 
+qtTryRestoreSession();
 render();
